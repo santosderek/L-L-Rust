@@ -1,3 +1,5 @@
+extern crate client;
+
 use futures_util::{SinkExt, StreamExt};
 use std::io::{self, Write};
 use tokio::select;
@@ -5,7 +7,10 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use url::Url;
 
+use client::structs::messages::{ClientMessage, ServerErrorMessage};
+
 const WS_URL: &str = "ws://localhost:8080";
+const username: &str = "derek";
 
 #[tokio::main]
 async fn main() {
@@ -44,16 +49,40 @@ async fn main() {
         select! {
             // Send user input to the WebSocket server
             Some(msg) = rx.recv() => {
-                if write.send(Message::Text(msg)).await.is_err() {
+                let msg = ClientMessage {
+                    user: username.to_string(),
+                    msg,
+                };
+                if write.send(Message::Text(serde_json::to_string(&msg).unwrap())).await.is_err() {
                     eprintln!("Failed to send message");
                     break;
                 }
             }
             // Read messages from the WebSocket server
             Some(Ok(message)) = read.next() => {
-                if let Message::Text(text) = message {
-                    println!("Received: {}", text);
+
+                match serde_json::from_str::<ServerErrorMessage>(&message.to_string()) {
+                    Ok(server_error) => {
+                        eprintln!("\rServer error: {}", server_error.error);
+                        print!("> ");
+                        continue;
+                    }
+                    Err(_) => {
+                        // eprintln!("Failed to parse server message");
+                    }
                 }
+
+                match serde_json::from_str::<ClientMessage>(&message.to_string()) {
+                    Ok(client_message) => {
+                        println!("\r@{}: {}", client_message.user, client_message.msg);
+                        print!("> ");
+                    }
+                    Err(_) => {
+                        eprintln!("Failed to parse client message");
+                        continue;
+                    }
+                }
+
             }
             else => {
                 break;
