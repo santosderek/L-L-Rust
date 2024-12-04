@@ -11,12 +11,12 @@ use tracing::{debug, error, info, Level};
 use tracing_subscriber;
 
 use server::constants::{Clients, ADDRESS, PORT};
-use server::structs::messages::ClientMessage;
+use server::structs::messages::{ClientMessage, ServerErrorMessage};
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::TRACE) // Could do TRACE for full verbosity
         .init();
 
     info!("Starting WebSocket server");
@@ -54,9 +54,10 @@ async fn client_connected(
     clients.lock().unwrap().insert(id.clone().to_string(), tx);
 
     // Spawn a task to send messages to the client
-    let (mut ws_sink, mut ws_stream) = ws_stream.split();
+    let (mut ws_write, mut ws_read) = ws_stream.split();
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
+            debug!("Sending message to client: {:?}", msg);
             // Validate Message is in correct format
             match serde_json::from_str::<ClientMessage>(&msg.to_string()) {
                 Ok(client_message) => {
@@ -65,18 +66,30 @@ async fn client_connected(
                         client_message.user, client_message.msg
                     );
 
-                    if ws_sink.send(msg).await.is_err() {
+                    if ws_write.send(msg).await.is_err() {
                         error!(
                             "Error sending message '{}'  from user '{}'",
                             client_message.msg, client_message.user
                         );
-                        // break;
                         continue;
                     }
                 }
                 Err(e) => {
                     error!("Error deserializing message: {}", e);
-                    continue;
+
+                    let response = ws_write
+                        .send(Message::Text(
+                            serde_json::to_string(&ServerErrorMessage {
+                                code: 400,
+                                error: "Invalid message format".to_string(),
+                            })
+                            .unwrap(),
+                        ))
+                        .await;
+                    if response.is_err() {
+                        error!("Error sending message to client");
+                        break;
+                    }
                 }
             };
         }
@@ -84,7 +97,8 @@ async fn client_connected(
 
     let id = id.clone();
     // Receive messages from the client
-    while let Some(Ok(ref msg)) = ws_stream.next().await {
+    while let Some(Ok(ref msg)) = ws_read.next().await {
+        debug!("Received message from client: {:?}", msg);
         handle_message(&msg, &id, &clients).await;
     }
 
@@ -94,12 +108,26 @@ async fn client_connected(
 }
 
 async fn handle_message(msg: &Message, sender_id: &String, clients: &Clients) {
-    if let Message::Text(text) = msg {
-        // Broadcast the message to all other clients
-        for (id, tx) in clients.lock().unwrap().iter() {
-            if id != sender_id {
+    match msg {
+        Message::Close(_) => {
+            debug!("Client disconnected: {}", sender_id);
+        }
+
+        Message::Text(text) => {
+            debug!("Received text message: {}", text);
+
+            // Broadcast the message to all other clients
+            debug!("Broadcasting message to all clients: {}", text);
+            for (id, tx) in clients.lock().unwrap().iter() {
+                // if id != sender_id {
+                //     let _ = tx.send(Message::Text(text.clone()));
+                // }
                 let _ = tx.send(Message::Text(text.clone()));
             }
+        }
+
+        _ => {
+            error!("Received unsupported message type");
         }
     }
 }
