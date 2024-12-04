@@ -13,20 +13,26 @@ const WS_URL: &str = "ws://localhost:8080";
 
 #[tokio::main]
 async fn main() {
+    // Validate the WebSocket URL
     let url = Url::parse(WS_URL).expect("Invalid URL").to_string();
 
+    // Get the username from the user
     println!("Enter your username:");
     let mut username = String::new();
     io::stdin().read_line(&mut username).unwrap();
     let username = username.trim();
 
+    // Connect to the WebSocket server
     let (ws_stream, _) = connect_async(&url)
         .await
         .expect("Failed to connect to WebSocket server");
 
     println!("Connected to server");
 
+    // Split the WebSocket stream into read and write halves
     let (mut write, mut read) = ws_stream.split();
+
+    // Channel for sending user input to the WebSocket server
     let (tx, mut rx) = mpsc::channel::<String>(100);
 
     // Task for reading user input from stdin
@@ -49,7 +55,10 @@ async fn main() {
         }
     });
 
+    // Main event loop
     loop {
+        // Wait until either a message is received from the WebSocket server or user input is
+        // received
         select! {
             // Send user input to the WebSocket server
             Some(msg) = rx.recv() => {
@@ -62,6 +71,7 @@ async fn main() {
                     break;
                 }
             }
+
             // Read messages from the WebSocket server
             Some(Ok(message)) = read.next() => {
 
