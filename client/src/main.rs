@@ -10,11 +10,15 @@ use url::Url;
 use client::structs::messages::{ClientMessage, ServerErrorMessage};
 
 const WS_URL: &str = "ws://localhost:8080";
-const username: &str = "derek";
 
 #[tokio::main]
 async fn main() {
     let url = Url::parse(WS_URL).expect("Invalid URL").to_string();
+
+    println!("Enter your username:");
+    let mut username = String::new();
+    io::stdin().read_line(&mut username).unwrap();
+    let username = username.trim();
 
     let (ws_stream, _) = connect_async(&url)
         .await
@@ -31,7 +35,7 @@ async fn main() {
         let mut input = String::new();
         loop {
             input.clear();
-            print!("> ");
+            // print!(">> ");
             io::stdout().flush().unwrap();
             if io::stdin().read_line(&mut input).is_err() {
                 eprintln!("Failed to read from stdin");
@@ -64,18 +68,15 @@ async fn main() {
                 match serde_json::from_str::<ServerErrorMessage>(&message.to_string()) {
                     Ok(server_error) => {
                         eprintln!("\rServer error: {}", server_error.error);
-                        print!("> ");
+                        print!(">> ");
                         continue;
                     }
-                    Err(_) => {
-                        // eprintln!("Failed to parse server message");
-                    }
+                    Err(_) => { }
                 }
 
                 match serde_json::from_str::<ClientMessage>(&message.to_string()) {
                     Ok(client_message) => {
-                        println!("\r@{}: {}", client_message.user, client_message.msg);
-                        print!("> ");
+                        println!("@{}: {}\n>>", client_message.user, client_message.msg);
                     }
                     Err(_) => {
                         eprintln!("Failed to parse client message");
